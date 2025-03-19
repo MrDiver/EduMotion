@@ -24,14 +24,16 @@ def benchmark_fanout(num_computed, iterations):
     for _ in range(iterations):
         base = Signal(lambda: 0, name="Base")
         computed_list = [
-            Signal(lambda base=base: base(), name=f"Comp{i}")
+            Signal(lambda base=base: base() + 1, name=f"Comp{i}")
             for i in range(num_computed)
         ]
-        start = time.time()
-        _ = computed_list[-1]()  # Warm-up
+        final = Signal(lambda: sum([s() for s in computed_list]), name="Final")
         base.set(1)  # Trigger all computations
+        start = time.time()
+        result = final()  # Warm-up
         end = time.time()
         times.append(end - start)
+        logger.info(f"{result=}")
     return statistics.median(times)
 
 
@@ -65,16 +67,17 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
     print("Benchmarking chain propagation time...")
     fancy_chain_length = 100000
-    fancy_fanout = 10
+    fancy_fanout = 100000
     iterations = 5
     propagation_time = benchmark_chain(fancy_chain_length, iterations)
     logger.info(
         f"Median propagation time for chain of length {fancy_chain_length}: {propagation_time:.6f} s"
     )
 
-    # fanout_time = benchmark_fanout(fancy_fanout, iterations)
-    # print(f"Median propagation time for fanout of size {fancy_fanout}: {fanout_time:.6f} s")
-    logger.info(SDM.graph)
+    fanout_time = benchmark_fanout(fancy_fanout, iterations)
+    print(
+        f"Median propagation time for fanout of size {fancy_fanout}: {fanout_time:.6f} s"
+    )
 
     # anim = Animatable()
     # anim2 = Animatable()

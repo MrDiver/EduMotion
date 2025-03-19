@@ -25,7 +25,6 @@ class Signal:
         SDM.registerSignal(self)
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
-        logger.debug(f"Calling signal {self}")
         if SDM.context == SDMState.REGISTERING:
             SDM.signalDependent(self)
         if SDM.context == SDMState.EXECUTING:
@@ -40,6 +39,7 @@ class Signal:
         else:
             self.value = funcOrVal
             self.func = lambda: funcOrVal
+            SDM.markDirty(self)
             SDM.markClean(self)
 
     def recompute(self) -> None:
