@@ -9,5 +9,6 @@ dependencies = [
     "debugpy>=1.8.13",
     "log-symbols>=0.0.14",
     "numpy>=2.2.4",
+    "pytest-benchmark>=5.1.0",
     "vprof>=0.38",
 ]

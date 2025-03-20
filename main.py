@@ -1,7 +1,7 @@
 import debugpy
 import statistics
-from reactsignal import Signal
-from logger_config import logger
+from sig.reactsignal import Signal
+from sig.logger_config import logger
 import time
 
 import logging

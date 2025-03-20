@@ -1,8 +1,5 @@
 from typing import Any, Callable, Self, cast, overload, override, Iterable
 from weakref import WeakSet
-import weakref
-from logger_config import logger
-import logging
 from enum import Enum
 from collections import deque
 
@@ -114,13 +111,16 @@ class Signal:
         self.dirty = True
         if not recurse:
             return
-        queue = deque(self.subscribers)
+        queue = deque([x for x in self.subscribers if not x.dirty])
         while queue:
             signal = queue.popleft()
+            if signal.dirty:
+                continue
             signal.markDirty(False)
             queue.extend(signal.subscribers)
 
     def set(self, funcOrVal: Callable[[], Any] | Any) -> None:
+        # TODO: If param is the same do not mark dirty
         if isinstance(funcOrVal, Callable):
             self.func = funcOrVal
         else:
