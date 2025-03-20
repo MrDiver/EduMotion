@@ -1,7 +1,8 @@
-from typing import Any, Callable, Self, cast, overload, override
+from typing import Any, Callable, Self, cast, overload, override, Iterable
 from weakref import WeakSet
 import weakref
 from logger_config import logger
+import logging
 from enum import Enum
 from collections import deque
 
@@ -16,6 +17,17 @@ class Signal:
     state: SDMState = SDMState.EXECUTING
     current: "Signal | None" = None
     counter: int = 0
+    __slots__ = [
+        "id",
+        "name",
+        "value",
+        "func",
+        "is_source",
+        "dirty",
+        "subscribers",
+        "sources",
+        "__weakref__",
+    ]
 
     def __init__(
         self: Self,
@@ -39,19 +51,24 @@ class Signal:
             self.is_source = True
         Signal.counter += 1
 
-        # Lambdas wihout any defaults are also considered sources
-        sources = [x for x in self.func.__defaults__ or [] if isinstance(x, Signal)]
-        if len(sources) == 0:
-            self.is_source = True
-
         # Handling Signals
         self.dirty: bool = True
         self.subscribers: WeakSet[Signal] = (
             WeakSet()
         )  # Immediate Subscribers filled by calling subscribe
-        self.sources: WeakSet[Signal] = WeakSet(
-            sources
-        )  # Immediate Sources for debugging
+        self.sources: WeakSet[Signal] = WeakSet()  # Immediate Sources for debugging
+
+        # Lambdas wihout any defaults are also considered sources
+        # Flatten list if there are nested lists
+        if self.func.__defaults__ is None:
+            self.is_source = True
+            return
+
+        for source in self.func.__defaults__:
+            if isinstance(source, Iterable):
+                self.sources.update(source)
+            elif isinstance(source, Signal):
+                self.sources.add(source)
 
         for source in self.sources:
             source.subscribe(cast(Signal, self))
@@ -70,22 +87,19 @@ class Signal:
 
     def __call__(self, *arg: Callable[[], Any] | Any | None) -> Any | None:
         if Signal.state == SDMState.EXECUTING:
-            logger.debug(f"Executing {self}")
-            if self.isDirty():
+            if self.dirty:
                 self.scheduleRecompute()
-        if Signal.state == SDMState.RECOMPUTING:
-            logger.debug(f"Called as Dep {self}")
         return self.value
 
     def scheduleRecompute(self) -> None:
         Signal.state = SDMState.RECOMPUTING
-        queue = deque([cast(Signal, self)])
+        queue = deque([self])
         sorted_signals: list[Signal] = []
 
         while queue:
             signal = queue.popleft()
             sorted_signals.append(signal)
-            queue.extend(source for source in signal.sources if source.dirty)
+            queue.extend(source for source in signal.sources if source.dirty)  # type: ignore
 
         for signal in reversed(sorted_signals):
             signal.recompute()
@@ -95,9 +109,6 @@ class Signal:
     def recompute(self) -> None:
         self.value = self.func()
         self.dirty = False
-
-    def isDirty(self) -> bool:
-        return self.dirty
 
     def markDirty(self, recurse=True) -> None:
         self.dirty = True
