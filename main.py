@@ -1,40 +1,36 @@
-import statistics
 import debugpy
-from signal import Signal, SDM
-from time import sleep
+import statistics
+from reactsignal import Signal
 from logger_config import logger
-import tween
 import time
 
-from tween import FPS
-from tween import easeInQuad
-from tween import easeInOutCubic
-from logging import Logger
 import logging
 
-from animatable import Animatable
 
-
-def benchmark_fanout(num_computed, iterations):
+def benchmark_fanout(num_computed: int, iterations: int):
     """
     Create one base signal and `num_computed` dependent Signals.
     Then update the base signal and measure how long the update takes.
     """
+    creation_times = []
     times = []
     for _ in range(iterations):
+        start_reation = time.time()
         base = Signal(lambda: 0, name="Base")
         computed_list = [
-            Signal(lambda base=base: base() + 1, name=f"Comp{i}")
+            Signal(lambda base=base: base() + 1, name=f"Comp{i}", sources=[base])
             for i in range(num_computed)
         ]
         final = Signal(lambda: sum([s() for s in computed_list]), name="Final")
-        base.set(1)  # Trigger all computations
+        end_reation = time.time()
+        creation_times.append(end_reation - start_reation)
         start = time.time()
+        base.set(1)  # Trigger all computations
         result = final()  # Warm-up
         end = time.time()
         times.append(end - start)
         logger.info(f"{result=}")
-    return statistics.median(times)
+    return statistics.median(times), statistics.median(times)
 
 
 def benchmark_chain(chain_length, iterations):
@@ -42,15 +38,20 @@ def benchmark_chain(chain_length, iterations):
     Create a chain of Signals where each depends on the previous one.
     Then update the base signal and measure the propagation time.
     """
+    creation_times = []
     times = []
     for _ in range(iterations):
+        start_reation = time.time()
         base = Signal(0, name="Base")
         prev = base
         chain = []
         for i in range(chain_length):
-            comp = Signal(lambda prev=prev: prev() + 1, name=f"Chain")
+            comp = Signal(lambda a=prev: a() + 1, name="Chain")
             chain.append(comp)
             prev = comp
+        end_reation = time.time()
+        creation_times.append(end_reation - start_reation)
+
         start = time.time()
         _ = chain[-1]()  # Warm-up
         base.set(1)  # Trigger the full recomputation chain
@@ -58,7 +59,7 @@ def benchmark_chain(chain_length, iterations):
         end = time.time()
         logger.info(f"{result=}")
         times.append(end - start)
-    return statistics.median(times)
+    return statistics.median(creation_times), statistics.median(times)
 
 
 if __name__ == "__main__":
@@ -66,18 +67,18 @@ if __name__ == "__main__":
     # debugpy.wait_for_client()
     logger.setLevel(logging.INFO)
     print("Benchmarking chain propagation time...")
-    fancy_chain_length = 100000
-    fancy_fanout = 100000
-    iterations = 5
-    propagation_time = benchmark_chain(fancy_chain_length, iterations)
+    fancy_chain_length = 100_000
+    fancy_fanout = 3
+    iterations = 1
+    creation, propagation_time = benchmark_chain(fancy_chain_length, iterations)
     logger.info(
-        f"Median propagation time for chain of length {fancy_chain_length}: {propagation_time:.6f} s"
+        f"Chain {fancy_chain_length}: Creation: {creation:.2f}s Prop: {propagation_time:.2f}s"
     )
 
-    fanout_time = benchmark_fanout(fancy_fanout, iterations)
-    print(
-        f"Median propagation time for fanout of size {fancy_fanout}: {fanout_time:.6f} s"
-    )
+    # creation, fanout_time = benchmark_fanout(fancy_fanout, iterations)
+    # logger.info(
+    #     f"Fanout {fancy_fanout}: Creation: {creation:.2f}s Prop: {fanout_time:.2f}s"
+    # )
 
     # anim = Animatable()
     # anim2 = Animatable()
