@@ -108,6 +108,8 @@ class Signal:
         self.dirty = False
 
     def markDirty(self, recurse=True) -> None:
+        if self.dirty:
+            return
         self.dirty = True
         if not recurse:
             return
@@ -120,7 +122,6 @@ class Signal:
             queue.extend(signal.subscribers)
 
     def set(self, funcOrVal: Callable[[], Any] | Any) -> None:
-        # TODO: If param is the same do not mark dirty
         if isinstance(funcOrVal, Callable):
             self.func = funcOrVal
         else:

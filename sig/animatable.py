@@ -17,7 +17,4 @@ class Animatable:
 
     @left.setter
     def left(self, value):
-        self.x(
-            lambda: self.x() - self.width() + value()
-        )  # Irgendwas hier damit die Linke seite des objekts auf der Position ist die reingegeben wird
-        # UNd deswegen sollte es nicht x und y einzeln sein ... ich idiot :rofl:
+        self.x(lambda: self.x() - self.width() + value())

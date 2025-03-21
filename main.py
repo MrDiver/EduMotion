@@ -1,113 +1,90 @@
-import debugpy
-import statistics
-from sig.reactsignal import Signal
-from sig.logger_config import logger
-import time
-
-import logging
+from typing import Any, override
+from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+import skia
 
 
-def format_duration(duration: float) -> str:
-    """
-    Format a duration (in seconds) into a human-readable string with an appropriate unit.
+class SkiaWidget(QOpenGLWidget):
+    def __init__(self, parent: Any = None) -> None:
+        super().__init__(parent)
+        # Optionally configure the surface format
+        self.gr_context = None
+        self.sk_surface = None
 
-    If duration is:
-      - < 1e-6 seconds, use nanoseconds (ns)
-      - < 1e-3 seconds, use microseconds (µs)
-      - < 1 second, use milliseconds (ms)
-      - otherwise, use seconds (s)
-    """
-    if duration < 1e-6:
-        # Convert to nanoseconds
-        return f"{duration * 1e9:.2f} ns"
-    elif duration < 1e-3:
-        # Convert to microseconds
-        return f"{duration * 1e6:.2f} µs"
-    elif duration < 1:
-        # Convert to milliseconds
-        return f"{duration * 1e3:.2f} ms"
-    else:
-        # Use seconds
-        return f"{duration:.2f} s"
+    @override
+    def initializeGL(self, /) -> None:
+        # Called once to initialize OpenGL; create a Skia GPU context.
+        # Make sure you have set up an appropriate context in your system.
+        self.gr_context = skia.GrDirectContext.MakeGL()
+        self.create_skia_surface()
 
+    def create_skia_surface(self):
+        # Get the dimensions of the widget
+        width, height = self.width(), self.height()
+        # Retrieve framebuffer info from QOpenGLWidget
+        fb_id = self.defaultFramebufferObject()
+        # Create Skia render target info (this API may differ based on skia-python version)
+        fb_info = skia.GrGLFramebufferInfo(fb_id, skia.kRGBA_8888_ColorType)
+        print(fb_info)
+        image_info = skia.ImageInfo.MakeN32Premul(width, height)
+        backend_render_target = skia.GrBackendRenderTarget(width, height, 0, 0, fb_info)
+        print(backend_render_target)
+        # Create a Skia surface from the backend render target
+        self.sk_surface = skia.Surface.MakeFromBackendRenderTarget(
+            self.gr_context,
+            backend_render_target,
+            skia.kBottomLeft_GrSurfaceOrigin,
+            skia.kRGBA_8888_ColorType,
+            None,
+            None,
+        )
+        if self.sk_surface is None:
+            print("Failed to create Skia surface!")
+            exit(1)
 
-def benchmark_fanout(num_computed: int, iterations: int):
-    """
-    Create one base signal and `num_computed` dependent Signals.
-    Then update the base signal and measure how long the update takes.
-    """
-    creation_times = []
-    times = []
-    for _ in range(iterations):
-        start_reation = time.time()
-        base = Signal(0, name="Base")
-        computed_list = [
-            Signal(lambda base=base: base() + 1, name=f"Comp{i}")
-            for i in range(num_computed)
-        ]
-        final = Signal(lambda cl=computed_list: sum([s() for s in cl]), name="Final")
-        end_reation = time.time()
-        creation_times.append(end_reation - start_reation)
-        start = time.time()
-        base.set(1)  # Trigger all computations
-        result = final()  # Warm-up
-        end = time.time()
-        times.append(end - start)
-        logger.info(f"{result=}")
-    return statistics.median(times), statistics.median(times)
-
-
-def benchmark_chain(chain_length, iterations):
-    """
-    Create a chain of Signals where each depends on the previous one.
-    Then update the base signal and measure the propagation time.
-    """
-    creation_times = []
-    times = []
-    for _ in range(iterations):
-        start_reation = time.time()
-        base = Signal(0, name="Base")
-        prev = base
-        chain = []
-        for i in range(chain_length):
-            comp = Signal(lambda a=prev: a() + 1, name="Chain")
-            chain.append(comp)
-            prev = comp
-        end_reation = time.time()
-        creation_times.append(end_reation - start_reation)
-
-        start = time.time()
-        _ = chain[-1]()  # Warm-up
-        base.set(1)  # Trigger the full recomputation chain
-        result = chain[-1]()
-        end = time.time()
-        logger.info(f"{result=} time={end - start:0.2f}")
-        times.append(end - start)
-    return statistics.median(creation_times), statistics.median(times)
+    @override
+    def paintGL(self):
+        # If the surface hasn't been created or the widget was resized, recreate it.
+        if (
+            self.sk_surface is None
+            or self.width() != self.sk_surface.width()
+            or self.height() != self.sk_surface.height()
+        ):
+            self.create_skia_surface()
+        canvas = self.sk_surface.getCanvas()
+        # Clear the canvas
+        canvas.clear(skia.ColorWHITE)
+        # Draw a simple Bezier curve as an example
+        paint = skia.Paint(
+            Color=skia.ColorBLUE,
+            AntiAlias=True,
+            StrokeWidth=4,
+            Style=skia.Paint.kStroke_Style,
+        )
+        path = skia.Path()
+        path.moveTo(50, self.height() // 2)
+        path.cubicTo(
+            150, 50, 250, self.height() - 50, self.width() - 50, self.height() // 2
+        )
+        canvas.drawPath(path, paint)
+        # Flush Skia commands so they get executed on the GPU.
+        self.sk_surface.flushAndSubmit()
 
 
 if __name__ == "__main__":
-    # debugpy.listen(("localhost", 5678))
-    # debugpy.wait_for_client()
-    logger.setLevel(logging.INFO)
-    print("Benchmarking chain propagation time...")
-    fancy_chain_length = 100_000
-    fancy_fanout = 100_000
-    iterations = 5
-    creation, propagation_time = benchmark_chain(fancy_chain_length, iterations)
-    logger.info(
-        f"Chain {fancy_chain_length}: Creation: {format_duration(creation)} Prop: {format_duration(propagation_time)}"
-    )
-
-    creation, fanout_time = benchmark_fanout(fancy_fanout, iterations)
-    logger.info(
-        f"Fanout {fancy_fanout}: Creation: {format_duration(creation)} Prop: {format_duration(fanout_time)}"
-    )
-
-    # anim = Animatable()
-    # anim2 = Animatable()
-    # tqdm.tqdm.write("Tweening")
-    # for tweenVal in tween.tween(1, lambda x: A(x), mapping=easeInOutCubic):
-    #     # Print blocks interpolated by result of C() as int
-    #     print(f"\r{anim2.position.x():3.3f}", end="")
-    #     sleep(1/FPS)
+    # surface = skia.Surface(640, 480)
+    # with surface as canvas:
+    #     paint = skia.Paint()
+    #     paint.setAntiAlias(True)
+    #     paint.setColor(skia.ColorWHITE)
+    #     canvas.drawPaint(paint)
+    #     paint.setColor(skia.ColorRED)
+    #     canvas.drawRect(skia.Rect(100, 100, 200, 200), paint)
+    # image = surface.makeImageSnapshot()
+    # image.save("output.png", skia.kPNG)
+    app = QApplication([])
+    label = QLabel("Hello World!")
+    label.show()
+    skia_widget = SkiaWidget()
+    skia_widget.show()
+    _ = app.exec()

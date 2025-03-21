@@ -9,6 +9,24 @@ dependencies = [
     "debugpy>=1.8.13",
     "log-symbols>=0.0.14",
     "numpy>=2.2.4",
+    "pyqt6>=6.8.1",
+    "pyside6>=6.8.2.1",
     "pytest-benchmark>=5.1.0",
+    "skia-python>=87.7",
     "vprof>=0.38",
 ]
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/node_modules",
+    "**/__pycache__",
+    "src/experimental",
+    "src/typestubs"
+]
+pythonVersion = "3.12"
+reportMissingTypeStubs = false
+allowUntypedLibraries = ["skia"]
+reportExplicitAny = false
+reportUnknownMemberType = false
+reportAny = false
+reportUnknownVariableType = false
