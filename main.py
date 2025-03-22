@@ -1,90 +1,112 @@
+import sys
 from typing import Any, override
-from PySide6.QtWidgets import QApplication, QLabel
-from PySide6.QtOpenGLWidgets import QOpenGLWidget
+import weakref
 import skia
+import glfw
+import contextlib
+from OpenGL import GL
+from sig import tween
+from sig.animatable import Animatable
 
 
-class SkiaWidget(QOpenGLWidget):
-    def __init__(self, parent: Any = None) -> None:
-        super().__init__(parent)
-        # Optionally configure the surface format
-        self.gr_context = None
-        self.sk_surface = None
+class GlfwWindow:
+    def __init__(self, width: int = 1920, height: int = 1080):
+        if not glfw.init():
+            raise RuntimeError("Failed to initialize GLFW")
+        glfw.window_hint(glfw.STENCIL_BITS, 8)
+        self.window: Any = glfw.create_window(
+            width, height, "Skia GLFW Example", None, None
+        )
+        glfw.make_context_current(self.window)
+        _ = weakref.finalize(self, self.close)
 
-    @override
-    def initializeGL(self, /) -> None:
-        # Called once to initialize OpenGL; create a Skia GPU context.
-        # Make sure you have set up an appropriate context in your system.
-        self.gr_context = skia.GrDirectContext.MakeGL()
-        self.create_skia_surface()
+    def clear_screen(self):
+        GL.glClearColor(1, 1, 1, 1)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
-    def create_skia_surface(self):
-        # Get the dimensions of the widget
-        width, height = self.width(), self.height()
-        # Retrieve framebuffer info from QOpenGLWidget
-        fb_id = self.defaultFramebufferObject()
-        # Create Skia render target info (this API may differ based on skia-python version)
-        fb_info = skia.GrGLFramebufferInfo(fb_id, skia.kRGBA_8888_ColorType)
-        print(fb_info)
-        image_info = skia.ImageInfo.MakeN32Premul(width, height)
-        backend_render_target = skia.GrBackendRenderTarget(width, height, 0, 0, fb_info)
-        print(backend_render_target)
-        # Create a Skia surface from the backend render target
-        self.sk_surface = skia.Surface.MakeFromBackendRenderTarget(
-            self.gr_context,
+    def swap_buffers(self):
+        glfw.swap_buffers(self.window)
+        glfw.poll_events()
+
+    def should_close(self):
+        return glfw.window_should_close(self.window)
+
+    def close(self):
+        glfw.destroy_window(self.window)
+        glfw.terminate()
+
+
+class SkiaSurface(GlfwWindow):
+    def __init__(self, width: int = 1920, height: int = 1080):
+        super().__init__(width, height)
+        self.context: skia.GrDirectContext | None = skia.GrDirectContext.MakeGL()
+        if self.context is None:
+            raise RuntimeError("Failed to create GrDirectContext")
+        width, height = glfw.get_framebuffer_size(self.window)
+        backend_render_target = skia.GrBackendRenderTarget(
+            width,
+            height,
+            0,
+            0,
+            skia.GrGLFramebufferInfo(0, GL.GL_RGBA8),
+        )
+        assert backend_render_target.isValid(), "Failed to create GrBackendRenderTarget"
+        self.surface = skia.Surface.MakeFromBackendRenderTarget(
+            self.context,
             backend_render_target,
             skia.kBottomLeft_GrSurfaceOrigin,
             skia.kRGBA_8888_ColorType,
-            None,
-            None,
+            skia.ColorSpace.MakeSRGB(),
         )
-        if self.sk_surface is None:
-            print("Failed to create Skia surface!")
-            exit(1)
+        assert self.surface is not None, "Failed to create Skia surface"
 
     @override
-    def paintGL(self):
-        # If the surface hasn't been created or the widget was resized, recreate it.
-        if (
-            self.sk_surface is None
-            or self.width() != self.sk_surface.width()
-            or self.height() != self.sk_surface.height()
-        ):
-            self.create_skia_surface()
-        canvas = self.sk_surface.getCanvas()
-        # Clear the canvas
-        canvas.clear(skia.ColorWHITE)
-        # Draw a simple Bezier curve as an example
-        paint = skia.Paint(
-            Color=skia.ColorBLUE,
-            AntiAlias=True,
-            StrokeWidth=4,
-            Style=skia.Paint.kStroke_Style,
-        )
-        path = skia.Path()
-        path.moveTo(50, self.height() // 2)
-        path.cubicTo(
-            150, 50, 250, self.height() - 50, self.width() - 50, self.height() // 2
-        )
-        canvas.drawPath(path, paint)
-        # Flush Skia commands so they get executed on the GPU.
-        self.sk_surface.flushAndSubmit()
+    def close(self):
+        super().close()
+        self.context.abandonContext()
+
+
+class Renderer:
+    def __init__(self):
+        self.gl = SkiaSurface()
+        self.surface = self.gl.surface
+        self.window = self.gl.window
+        self.gen = tween.tween(1, lambda x: x, tween.easeInOutQuad)
+
+    def draw(self, animatable: Animatable, canvas: skia.Canvas):
+        paint = skia.Paint()
+        paint.setColor(skia.ColorRED)
+        canvas.drawCircle(animatable.x(), animatable.y(), 50, paint)
+
+    def draw_frame(self, list_of_animatables: list[Animatable]):
+        self.gl.clear_screen()
+        with self.surface as canvas:
+            for animatable in list_of_animatables:
+                self.draw(animatable, canvas)
+        self.surface.flushAndSubmit()
+        self.gl.swap_buffers()
+
+
+class Scene:
+    def __init__(self):
+        self.animatables: list[Animatable] = []
+
+    def get_state(self) -> list[Animatable]:
+        return self.animatables
 
 
 if __name__ == "__main__":
-    # surface = skia.Surface(640, 480)
-    # with surface as canvas:
-    #     paint = skia.Paint()
-    #     paint.setAntiAlias(True)
-    #     paint.setColor(skia.ColorWHITE)
-    #     canvas.drawPaint(paint)
-    #     paint.setColor(skia.ColorRED)
-    #     canvas.drawRect(skia.Rect(100, 100, 200, 200), paint)
-    # image = surface.makeImageSnapshot()
-    # image.save("output.png", skia.kPNG)
-    app = QApplication([])
-    label = QLabel("Hello World!")
-    label.show()
-    skia_widget = SkiaWidget()
-    skia_widget.show()
-    _ = app.exec()
+    renderer = Renderer()
+    animatable = Animatable()
+    animatable.y(512)
+    animatable2 = Animatable()
+    animatable2.x(lambda x=animatable.x: x() + 100)
+    animatable2.y(700)
+    animation = tween.tween(10, lambda n: animatable.x(n * 1000), tween.easeInOutQuad)
+    for x in animation:
+        renderer.draw_frame([animatable, animatable2])
+    animation = tween.tween(
+        3, lambda n: animatable.y((1 - n) * 512), tween.easeInOutQuad
+    )
+    for y in animation:
+        renderer.draw_frame([animatable, animatable2])

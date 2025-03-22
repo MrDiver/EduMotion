@@ -1,7 +1,9 @@
+import re
 from typing import Any, Callable, Self, cast, overload, override, Iterable
 from weakref import WeakSet
 from enum import Enum
 from collections import deque
+import weakref
 
 
 class SDMState(Enum):
@@ -37,6 +39,17 @@ class Signal:
         self.func: Callable[[], Any]
         self.is_source: bool
 
+        Signal.counter += 1
+
+        # Handling Signals
+        self.dirty: bool = True
+        self.subscribers: WeakSet[Signal] = (
+            WeakSet()
+        )  # Immediate Subscribers filled by calling subscribe
+        self.sources: WeakSet[Signal] = WeakSet()  # Immediate Sources for debugging
+        weakref.finalize(self, self.deconstruct)
+
+    def set(self, funcOrVal: Callable[[], Any] | Any) -> None:
         # Checking if func is a function and then setting it as source
         if isinstance(funcOrVal, Callable):
             self.func = funcOrVal
@@ -46,21 +59,15 @@ class Signal:
             self.func = lambda x=funcOrVal: x
             self.value = funcOrVal
             self.is_source = True
-        Signal.counter += 1
 
-        # Handling Signals
-        self.dirty: bool = True
-        self.subscribers: WeakSet[Signal] = (
-            WeakSet()
-        )  # Immediate Subscribers filled by calling subscribe
-        self.sources: WeakSet[Signal] = WeakSet()  # Immediate Sources for debugging
-
+        self.markDirty()
         # Lambdas wihout any defaults are also considered sources
         # Flatten list if there are nested lists
         if self.func.__defaults__ is None:
             self.is_source = True
             return
 
+        self.sources.clear()
         for source in self.func.__defaults__:
             if isinstance(source, Iterable):
                 self.sources.update(source)
@@ -83,6 +90,10 @@ class Signal:
     def __call__(self, *arg: Any) -> None: ...
 
     def __call__(self, *arg: Callable[[], Any] | Any | None) -> Any | None:
+        if arg:
+            self.set(arg[0])
+            return
+
         if Signal.state == SDMState.EXECUTING:
             if self.dirty:
                 self.scheduleRecompute()
@@ -120,14 +131,6 @@ class Signal:
                 continue
             signal.markDirty(False)
             queue.extend(signal.subscribers)
-
-    def set(self, funcOrVal: Callable[[], Any] | Any) -> None:
-        if isinstance(funcOrVal, Callable):
-            self.func = funcOrVal
-        else:
-            self.value = funcOrVal
-            self.func = lambda: funcOrVal
-        self.markDirty()
 
     def deconstruct(self):
         for source in self.sources:
