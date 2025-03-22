@@ -87,12 +87,15 @@ class Renderer:
         self.gl.swap_buffers()
 
 
+class Timeline: ...
+
+
 class Scene:
     def __init__(self):
-        self.animatables: list[Animatable] = []
+        self.animatables: set[Animatable] = set()
 
-    def get_state(self) -> list[Animatable]:
-        return self.animatables
+    def add(self, animatable: Animatable):
+        self.animatables.add(animatable)
 
 
 if __name__ == "__main__":
