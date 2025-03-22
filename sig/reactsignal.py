@@ -47,6 +47,7 @@ class Signal:
             WeakSet()
         )  # Immediate Subscribers filled by calling subscribe
         self.sources: WeakSet[Signal] = WeakSet()  # Immediate Sources for debugging
+        self.set(funcOrVal)
         weakref.finalize(self, self.deconstruct)
 
     def set(self, funcOrVal: Callable[[], Any] | Any) -> None:

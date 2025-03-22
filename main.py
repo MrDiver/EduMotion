@@ -1,5 +1,7 @@
 import sys
-from typing import Any, Generator, override
+import time
+import debugpy
+from typing import Any, Callable, Generator, override
 import weakref
 import skia
 import glfw
@@ -8,6 +10,7 @@ from OpenGL import GL
 from sig import tween
 from sig.animatable import Animatable
 from dataclasses import dataclass
+import numpy as np
 
 
 class GlfwWindow:
@@ -88,11 +91,49 @@ class Renderer:
         self.gl.swap_buffers()
 
 
-@dataclass
 class Animation:
-    start: float
-    end: float
-    generator: Generator
+    def __init__(
+        self, start: float, end: float, mapping: Callable[[float], float] = tween.linear
+    ) -> None:
+        self.start: float = start
+        self.end: float = end
+        self.mapping: Callable[[float], float] = mapping
+
+    def begin(self): ...
+    def animate(self, dt: float): ...
+    def finalize(self): ...
+
+    def __iter__(self):
+        frames = (self.end - self.start) * tween.FPS
+        self.begin()
+        for frame in np.linspace(0, 1, int(frames)):
+            yield self.animate(self.mapping(frame))
+        self.finalize()
+
+
+class Shift(Animation):
+    def __init__(
+        self, start: float, end: float, animatable: Animatable, shift: float, **kwargs
+    ) -> None:
+        super().__init__(start, end, **kwargs)
+        self.animatable: weakref.ref = weakref.ref(animatable)
+        self.shift: float = shift
+        self.start_x: float = 0
+
+    @override
+    def begin(self):
+        if (animatable := self.animatable()) is not None:
+            self.start_x = animatable.x()
+        # Maybe Locking for Signal
+
+    @override
+    def animate(self, dt: float):
+        if (animatable := self.animatable()) is not None:
+            animatable.x(self.start_x + self.shift * dt)
+
+    @override
+    def finalize(self): ...
+
 
 class Timeline: ...
 
@@ -106,15 +147,26 @@ class Scene:
 
 
 if __name__ == "__main__":
+    # debugpy.listen(5678)
+    # debugpy.wait_for_client()
+
     renderer = Renderer()
     animatable = Animatable()
     animatable.y(512)
     animatable2 = Animatable()
     animatable2.x(lambda x=animatable.x: x() + 100)
     animatable2.y(700)
-    animation = tween.tween(10, lambda n: animatable.x(n * 1000), tween.easeInOutQuad)
+
+    # TODO: This should still use durations and internally use start
+    animation = Shift(0, 3, animatable, 512, mapping=tween.easeInOutQuad)
     for x in animation:
+        # TODO: Figure out how to use delta times for live display or figure out how to make consistent framerate
+        start = time.time()
         renderer.draw_frame([animatable, animatable2])
+        end = time.time()
+        duration = end - start
+        if 1 / tween.FPS - duration > 0:
+            time.sleep(1 / tween.FPS - duration)
     animation = tween.tween(
         3, lambda n: animatable.y((1 - n) * 512), tween.easeInOutQuad
     )
