@@ -1,5 +1,5 @@
 import sys
-from typing import Any, override
+from typing import Any, Generator, override
 import weakref
 import skia
 import glfw
@@ -7,6 +7,7 @@ import contextlib
 from OpenGL import GL
 from sig import tween
 from sig.animatable import Animatable
+from dataclasses import dataclass
 
 
 class GlfwWindow:
@@ -86,6 +87,12 @@ class Renderer:
         self.surface.flushAndSubmit()
         self.gl.swap_buffers()
 
+
+@dataclass
+class Animation:
+    start: float
+    end: float
+    generator: Generator
 
 class Timeline: ...
 
