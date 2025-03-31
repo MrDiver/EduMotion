@@ -1,7 +1,7 @@
 import sys
 import time
 import debugpy
-from typing import Any, Callable, Generator, override
+from typing import Any, Callable, Generator, override, TypedDict, Unpack
 import weakref
 import skia
 import glfw
@@ -91,20 +91,43 @@ class Renderer:
         self.gl.swap_buffers()
 
 
+class TimeEvent:
+    def __init__(self, name: str) -> None:
+        self.name: str = name
+        self.value: Any = None
+
+
+class AnimationKwargs(TypedDict):
+    mapping: Callable[[float], float]
+
+
 class Animation:
-    def __init__(
-        self, start: float, end: float, mapping: Callable[[float], float] = tween.linear
-    ) -> None:
-        self.start: float = start
-        self.end: float = end
+    def __init__(self, mapping: Callable[[float], float] = tween.linear) -> None:
+        self._start: TimeEvent | float | None = None
+        self._end: TimeEvent | float | None = None
+        self.name: str = "Generic"
         self.mapping: Callable[[float], float] = mapping
 
     def begin(self): ...
     def animate(self, dt: float): ...
     def finalize(self): ...
 
+    def get_start(self) -> float:
+        assert self._start is not None
+        return self._start.value if isinstance(self._start, TimeEvent) else self._start
+
+    def set_start(self, start: float | TimeEvent):
+        self._start = start
+
+    def get_end(self) -> float:
+        assert self._end is not None
+        return self._end.value if isinstance(self._end, TimeEvent) else self._end
+
+    def set_end(self, end: float | TimeEvent):
+        self._end = end
+
     def __iter__(self):
-        frames = (self.end - self.start) * tween.FPS
+        frames = (self.get_end() - self.get_start()) * tween.FPS
         self.begin()
         for frame in np.linspace(0, 1, int(frames)):
             yield self.animate(self.mapping(frame))
@@ -113,9 +136,10 @@ class Animation:
 
 class Shift(Animation):
     def __init__(
-        self, start: float, end: float, animatable: Animatable, shift: float, **kwargs
+        self, animatable: Animatable, shift: float, **kwargs: Unpack[AnimationKwargs]
     ) -> None:
-        super().__init__(start, end, **kwargs)
+        super().__init__(**kwargs)
+        self.name: str = "Shift"
         self.animatable: weakref.ref = weakref.ref(animatable)
         self.shift: float = shift
         self.start_x: float = 0
@@ -135,7 +159,14 @@ class Shift(Animation):
     def finalize(self): ...
 
 
-class Timeline: ...
+class Timeline:
+    def __init__(self):
+        self.scenes: list[Scene] = []
+        self.animations: list[Animation] = []
+        self.time_events: list[TimeEvent] = []
+
+
+# TODO: TimeEvents can be created by passing a string to the start_time parameter of the play function in the scene
 
 
 class Scene:
@@ -144,6 +175,9 @@ class Scene:
 
     def add(self, animatable: Animatable):
         self.animatables.add(animatable)
+
+    def remove(self, animatable: Animatable):
+        self.animatables.remove(animatable)
 
 
 if __name__ == "__main__":
@@ -158,7 +192,9 @@ if __name__ == "__main__":
     animatable2.y(700)
 
     # TODO: This should still use durations and internally use start
-    animation = Shift(0, 3, animatable, 512, mapping=tween.easeInOutQuad)
+    animation = Shift(animatable, 512, mapping=tween.easeInOutQuad)
+    animation.set_start(0)
+    animation.set_end(3)
     for x in animation:
         # TODO: Figure out how to use delta times for live display or figure out how to make consistent framerate
         start = time.time()
